@@ -1,0 +1,22 @@
+---
+description: Rustプロジェクトの基本ルール
+alwaysApply: true
+---
+
+# Rustプロジェクトの基本ルール
+
+- Cargoの標準構成を維持する（`src/`, `Cargo.toml`）。
+- `rustfmt`に準拠する（手動整形よりも自動整形を優先）。
+- `clippy`警告は原則ゼロ（`allow`は理由がある場合のみ）。
+- `unwrap`/`expect`は最小限にし、失敗理由が明確な場面だけ使用する。
+- 可能な限り`Result`/`Option`でエラーを扱い、`?`で伝播する。
+
+## 例
+
+```rust
+// ❌ BAD
+let data = std::fs::read_to_string(path).unwrap();
+
+// ✅ GOOD
+let data = std::fs::read_to_string(path)?;
+```
