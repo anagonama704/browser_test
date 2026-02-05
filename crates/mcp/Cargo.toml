@@ -1,0 +1,17 @@
+[package]
+name = "integrity-mcp"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "integrity_mcp"
+path = "src/main.rs"
+
+[dependencies]
+integrity-core = { path = "../core" }
+integrity-parser = { path = "../parser" }
+integrity-rules = { path = "../rules" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }

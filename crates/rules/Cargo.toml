@@ -1,0 +1,10 @@
+[package]
+name = "integrity-rules"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+integrity-core = { path = "../core" }
+integrity-parser = { path = "../parser" }
+regex = { workspace = true }
+once_cell = { workspace = true }

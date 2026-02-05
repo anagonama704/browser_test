@@ -1,0 +1,16 @@
+[package]
+name = "integrity-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "integrity_check"
+path = "src/main.rs"
+
+[dependencies]
+integrity-core = { path = "../core" }
+integrity-parser = { path = "../parser" }
+integrity-rules = { path = "../rules" }
+clap = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
