@@ -17,23 +17,71 @@ fn main() -> eframe::Result<()> {
 }
 
 struct BrowserTestApp {
-    markdown_path: String,
     dark_mode: bool,
-    document: Option<Document>,
-    report: Option<AnalysisReport>,
-    last_error: Option<String>,
+    tabs: Vec<TabState>,
+    active_tab: usize,
 }
 
 impl BrowserTestApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let dark_mode = cc.egui_ctx.style().visuals.dark_mode;
         Self {
-            markdown_path: String::new(),
             dark_mode,
+            tabs: vec![TabState::new()],
+            active_tab: 0,
+        }
+    }
+
+    fn add_tab(&mut self) {
+        self.tabs.push(TabState::new());
+        self.active_tab = self.tabs.len().saturating_sub(1);
+    }
+
+    fn close_tab(&mut self, index: usize) {
+        if self.tabs.len() <= 1 || index >= self.tabs.len() {
+            return;
+        }
+        self.tabs.remove(index);
+        if self.active_tab > index {
+            self.active_tab = self.active_tab.saturating_sub(1);
+        }
+        if self.active_tab >= self.tabs.len() {
+            self.active_tab = self.tabs.len().saturating_sub(1);
+        }
+    }
+
+    fn active_tab_mut(&mut self) -> Option<&mut TabState> {
+        self.tabs.get_mut(self.active_tab)
+    }
+}
+
+struct TabState {
+    markdown_path: String,
+    document: Option<Document>,
+    report: Option<AnalysisReport>,
+    last_error: Option<String>,
+}
+
+impl TabState {
+    fn new() -> Self {
+        Self {
+            markdown_path: String::new(),
             document: None,
             report: None,
             last_error: None,
         }
+    }
+
+    fn title(&self, index: usize) -> String {
+        let trimmed = self.markdown_path.trim();
+        if trimmed.is_empty() {
+            return format!("Tab {}", index + 1);
+        }
+        let path = std::path::Path::new(trimmed);
+        if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
+            return file_name.to_string();
+        }
+        format!("Tab {}", index + 1)
     }
 
     fn load_markdown(&mut self) {
@@ -62,6 +110,43 @@ impl eframe::App for BrowserTestApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Philosophy Browser (Markdown v0)");
+            ui.horizontal(|ui| {
+                let mut selected_tab: Option<usize> = None;
+                let mut close_tab: Option<usize> = None;
+                let mut add_tab = false;
+
+                for (idx, tab) in self.tabs.iter().enumerate() {
+                    ui.push_id(idx, |ui| {
+                        let label = tab.title(idx);
+                        if ui.selectable_label(self.active_tab == idx, label).clicked() {
+                            selected_tab = Some(idx);
+                        }
+                        if self.tabs.len() > 1 {
+                            if ui.small_button("x").clicked() {
+                                close_tab = Some(idx);
+                            }
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
+
+                if ui.button("+").clicked() {
+                    add_tab = true;
+                }
+
+                if let Some(idx) = close_tab {
+                    self.close_tab(idx);
+                }
+                if add_tab {
+                    self.add_tab();
+                }
+                if let Some(idx) = selected_tab {
+                    if idx < self.tabs.len() {
+                        self.active_tab = idx;
+                    }
+                }
+            });
+            ui.separator();
             if ui
                 .checkbox(&mut self.dark_mode, "Dark mode")
                 .changed()
@@ -73,40 +158,47 @@ impl eframe::App for BrowserTestApp {
                 };
                 ctx.set_visuals(visuals);
             }
-            ui.horizontal(|ui| {
-                ui.label("Markdown path:");
-                let response = ui.text_edit_singleline(&mut self.markdown_path);
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    self.load_markdown();
-                }
-                if ui.button("Load").clicked() {
-                    self.load_markdown();
-                }
-            });
+            if let Some(tab) = self.active_tab_mut() {
+                ui.horizontal(|ui| {
+                    ui.label("Markdown path:");
+                    let response = ui.text_edit_singleline(&mut tab.markdown_path);
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        tab.load_markdown();
+                    }
+                    if ui.button("Load").clicked() {
+                        tab.load_markdown();
+                    }
+                });
 
-            if let Some(error) = &self.last_error {
-                ui.colored_label(egui::Color32::RED, error);
+                if let Some(error) = &tab.last_error {
+                    ui.colored_label(egui::Color32::RED, error);
+                }
+
+                ui.separator();
+                ui.heading("Rendered Page");
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if let Some(document) = &tab.document {
+                        render_document(ui, document);
+                    } else {
+                        ui.label("No Markdown loaded yet.");
+                    }
+                });
+
+                ui.separator();
+                ui.heading("Hard Constraints Report");
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if let Some(report) = &tab.report {
+                        render_report(ui, report, tab.document.as_ref());
+                    } else {
+                        ui.label("No analysis yet.");
+                    }
+                });
+            } else {
+                ui.colored_label(
+                    egui::Color32::RED,
+                    "No tabs available. Please add a new tab.",
+                );
             }
-
-            ui.separator();
-            ui.heading("Rendered Page");
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if let Some(document) = &self.document {
-                    render_document(ui, document);
-                } else {
-                    ui.label("No Markdown loaded yet.");
-                }
-            });
-
-            ui.separator();
-            ui.heading("Hard Constraints Report");
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if let Some(report) = &self.report {
-                    render_report(ui, report, self.document.as_ref());
-                } else {
-                    ui.label("No analysis yet.");
-                }
-            });
         });
     }
 }
