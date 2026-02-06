@@ -7,6 +7,9 @@ use eframe::egui;
 use markdown::parse_markdown;
 use model::{BlockKind, Document};
 
+const MIN_TAB_COUNT: usize = 1;
+const TAB_SPACING: f32 = 6.0;
+
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions::default();
     eframe::run_native(
@@ -38,15 +41,14 @@ impl BrowserTestApp {
     }
 
     fn close_tab(&mut self, index: usize) {
-        if self.tabs.len() <= 1 || index >= self.tabs.len() {
+        if self.tabs.len() <= MIN_TAB_COUNT || index >= self.tabs.len() {
             return;
         }
         self.tabs.remove(index);
-        if self.active_tab > index {
-            self.active_tab = self.active_tab.saturating_sub(1);
-        }
         if self.active_tab >= self.tabs.len() {
             self.active_tab = self.tabs.len().saturating_sub(1);
+        } else if self.active_tab > index {
+            self.active_tab = self.active_tab.saturating_sub(1);
         }
     }
 
@@ -75,18 +77,20 @@ impl TabState {
     fn title(&self, index: usize) -> String {
         let trimmed = self.markdown_path.trim();
         if trimmed.is_empty() {
-            return format!("Tab {}", index + 1);
+            return format!("Tab {}", index.saturating_add(1));
         }
         let path = std::path::Path::new(trimmed);
         if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
             return file_name.to_string();
         }
-        format!("Tab {}", index + 1)
+        format!("Tab {}", index.saturating_add(1))
     }
 
     fn load_markdown(&mut self) {
         let path = self.markdown_path.trim();
         if path.is_empty() {
+            self.document = None;
+            self.report = None;
             self.last_error = Some("Please enter a Markdown file path.".to_string());
             return;
         }
@@ -100,6 +104,8 @@ impl TabState {
                 self.last_error = None;
             }
             Err(err) => {
+                self.document = None;
+                self.report = None;
                 self.last_error = Some(format!("Failed to read file: {}", err));
             }
         }
@@ -121,13 +127,13 @@ impl eframe::App for BrowserTestApp {
                         if ui.selectable_label(self.active_tab == idx, label).clicked() {
                             selected_tab = Some(idx);
                         }
-                        if self.tabs.len() > 1 {
+                        if self.tabs.len() > MIN_TAB_COUNT {
                             if ui.small_button("x").clicked() {
                                 close_tab = Some(idx);
                             }
                         }
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(TAB_SPACING);
                 }
 
                 if ui.button("+").clicked() {
