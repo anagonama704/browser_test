@@ -1,25 +1,59 @@
+mod analysis;
+mod markdown;
+mod model;
+
+use analysis::{analyze_document, AnalysisReport};
 use eframe::egui;
+use markdown::parse_markdown;
+use model::{BlockKind, Document};
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions::default();
     eframe::run_native(
-        "Browser Test",
+        "Philosophy Browser",
         options,
         Box::new(|cc| Ok(Box::new(BrowserTestApp::new(cc)))),
     )
 }
 
 struct BrowserTestApp {
-    url: String,
+    markdown_path: String,
     dark_mode: bool,
+    document: Option<Document>,
+    report: Option<AnalysisReport>,
+    last_error: Option<String>,
 }
 
 impl BrowserTestApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let dark_mode = cc.egui_ctx.style().visuals.dark_mode;
         Self {
-            url: String::new(),
+            markdown_path: String::new(),
             dark_mode,
+            document: None,
+            report: None,
+            last_error: None,
+        }
+    }
+
+    fn load_markdown(&mut self) {
+        let path = self.markdown_path.trim();
+        if path.is_empty() {
+            self.last_error = Some("Please enter a Markdown file path.".to_string());
+            return;
+        }
+
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                let document = parse_markdown(&content);
+                let report = analyze_document(&document);
+                self.document = Some(document);
+                self.report = Some(report);
+                self.last_error = None;
+            }
+            Err(err) => {
+                self.last_error = Some(format!("Failed to read file: {}", err));
+            }
         }
     }
 }
@@ -27,7 +61,7 @@ impl BrowserTestApp {
 impl eframe::App for BrowserTestApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Browser Test");
+            ui.heading("Philosophy Browser (Markdown v0)");
             if ui
                 .checkbox(&mut self.dark_mode, "Dark mode")
                 .changed()
@@ -40,13 +74,138 @@ impl eframe::App for BrowserTestApp {
                 ctx.set_visuals(visuals);
             }
             ui.horizontal(|ui| {
-                ui.label("URL:");
-                ui.text_edit_singleline(&mut self.url);
+                ui.label("Markdown path:");
+                let response = ui.text_edit_singleline(&mut self.markdown_path);
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    self.load_markdown();
+                }
+                if ui.button("Load").clicked() {
+                    self.load_markdown();
+                }
             });
-            ui.separator();
-            if ui.button("Open").clicked() {
-                // TODO: Open the URL in a webview.
+
+            if let Some(error) = &self.last_error {
+                ui.colored_label(egui::Color32::RED, error);
             }
+
+            ui.separator();
+            ui.heading("Rendered Page");
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if let Some(document) = &self.document {
+                    render_document(ui, document);
+                } else {
+                    ui.label("No Markdown loaded yet.");
+                }
+            });
+
+            ui.separator();
+            ui.heading("Hard Constraints Report");
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if let Some(report) = &self.report {
+                    render_report(ui, report, self.document.as_ref());
+                } else {
+                    ui.label("No analysis yet.");
+                }
+            });
         });
     }
+}
+
+fn render_document(ui: &mut egui::Ui, document: &Document) {
+    for block in &document.blocks {
+        match &block.kind {
+            BlockKind::Heading { level } => {
+                let size = match level {
+                    1 => 24.0,
+                    2 => 20.0,
+                    3 => 18.0,
+                    _ => 16.0,
+                };
+                ui.label(egui::RichText::new(&block.text).size(size).strong());
+            }
+            BlockKind::Paragraph => {
+                ui.label(&block.text);
+            }
+            BlockKind::ListItem { ordered, .. } => {
+                let bullet = if *ordered { "1." } else { "-" };
+                ui.horizontal(|ui| {
+                    ui.label(bullet);
+                    ui.label(&block.text);
+                });
+            }
+            BlockKind::CodeBlock { .. } => {
+                ui.label(egui::RichText::new(&block.text).monospace());
+            }
+            BlockKind::BlockQuote => {
+                ui.label(egui::RichText::new(format!("> {}", block.text)).italics());
+            }
+        }
+        ui.add_space(4.0);
+    }
+}
+
+fn render_report(ui: &mut egui::Ui, report: &AnalysisReport, document: Option<&Document>) {
+    if report.hard_fail() {
+        ui.colored_label(
+            egui::Color32::RED,
+            format!("Hard fail: {} violation(s)", report.violations.len()),
+        );
+    } else {
+        ui.colored_label(egui::Color32::GREEN, "No violations");
+    }
+
+    for violation in &report.violations {
+        ui.separator();
+        ui.label(format!(
+            "Constraint {}: {}{}",
+            violation.constraint_id,
+            violation.summary,
+            if violation.assumption {
+                " (v0 assumption)"
+            } else {
+                ""
+            }
+        ));
+        ui.label(&violation.details);
+        if let Some(suggestion) = &violation.suggestion {
+            ui.label(format!("Suggestion: {}", suggestion));
+        }
+
+        if let Some(index) = violation.block_index {
+            if let Some(doc) = document {
+                if let Some(block) = doc.blocks.get(index) {
+                    let snippet = summarize(&block.text, 80);
+                    ui.label(format!(
+                        "Location: {} #{} - {}",
+                        block.kind.label(),
+                        index + 1,
+                        snippet
+                    ));
+                }
+            }
+        }
+    }
+
+    if !report.assumptions.is_empty() {
+        ui.separator();
+        ui.label("v0 assumptions:");
+        for item in &report.assumptions {
+            ui.label(format!("- {}", item));
+        }
+    }
+}
+
+fn summarize(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    let mut trimmed = String::new();
+    for (idx, ch) in text.chars().enumerate() {
+        if idx >= limit {
+            break;
+        }
+        trimmed.push(ch);
+    }
+    trimmed.push_str("...");
+    trimmed
 }
